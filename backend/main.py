@@ -88,6 +88,10 @@ class ComplaintResponse(BaseModel):
     timestamp: str
     formal_complaint: str
 
+class StatusUpdateRequest(BaseModel):
+    """Data model for authority status updates."""
+    status: str
+
 
 def map_department(issue_type: str) -> str:
     """
@@ -245,6 +249,36 @@ async def get_complaints() -> List[dict]:
     except Exception as e:
         logger.error(f"Error fetching complaints: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to fetch complaints.")
+
+@app.patch("/api/complaints/{complaint_id}/status")
+async def update_complaint_status(complaint_id: str, request: StatusUpdateRequest) -> dict:
+    """Authority Portal endpoint to update an issue's status."""
+    valid_statuses = ["pending", "in_progress", "resolved"]
+    
+    if request.status not in valid_statuses:
+        raise HTTPException(status_code=400, detail="Invalid status verb.")
+        
+    try:
+        # Update Firebase if initialized
+        if db is not None:
+            doc_ref = db.collection("complaints").document(complaint_id)
+            doc = doc_ref.get()
+            if not doc.exists:
+                raise HTTPException(status_code=404, detail="Complaint not found")
+            doc_ref.update({"status": request.status})
+            return {"status": "success", "new_status": request.status}
+        else:
+            # Fallback to Mock DB
+            if complaint_id not in mock_db:
+                raise HTTPException(status_code=404, detail="Complaint not found")
+            mock_db[complaint_id]["status"] = request.status
+            return {"status": "success", "new_status": request.status}
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating complaint: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to update complaint status")
 
 
 # Mount the React static files
