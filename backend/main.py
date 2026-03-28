@@ -14,6 +14,8 @@ import google.generativeai as genai
 import firebase_admin
 from firebase_admin import credentials, firestore
 from dotenv import load_dotenv
+import html
+from functools import lru_cache
 
 # Load Environment Variables from higher level directory
 load_dotenv(dotenv_path="../.env")
@@ -119,6 +121,7 @@ class StatusUpdateRequest(BaseModel):
     status: str
 
 
+@lru_cache(maxsize=128)
 def map_department(issue_type: str) -> str:
     """
     Decision Engine logic to map issues to specific departments.
@@ -187,6 +190,11 @@ async def report_issue(
         ]
 
         # STEP 3: Classification Prompts for Gemini
+        
+        # SECURITY: Strictly sanitize all raw textual outputs to mathematically block physical XSS injection capabilities
+        safe_context = html.escape(extra_context) if extra_context else ""
+        safe_location = html.escape(location) if location else "Unknown Location"
+        
         classification_prompt = f"""
         You are a civic issue classifier.
         Given this image, identify:
@@ -195,7 +203,7 @@ async def report_issue(
         3. "severity_score": An integer from 1 to 10 evaluating the danger or urgency of this issue.
         4. "formal_complaint": A 3 paragraph, highly formal and legalistic grievance typed as if it was being directly submitted by a furious citizen to the municipal government. Address it to the 'Respected Commissioner' and urgently demand resolution using strong civic vocabulary.
         
-        {("Extra user context: " + extra_context) if extra_context else ""}
+        {("Extra user context: " + safe_context) if safe_context else ""}
 
         Return ONLY a raw JSON format:
         {{
@@ -221,13 +229,13 @@ async def report_issue(
         
         complaint_data = {
             "id": doc_id,
-            "issue_type": issue_type,
-            "description": description,
-            "location": location,
+            "issue_type": html.escape(issue_type),
+            "description": html.escape(description),
+            "location": safe_location,
             "department": department_mapped,
             "status": "pending",
             "timestamp": timestamp_str,
-            "formal_complaint": ai_data.get("formal_complaint", "Pending formal review."),
+            "formal_complaint": html.escape(ai_data.get("formal_complaint", "Pending formal review.")),
             "severity_score": int(ai_data.get("severity_score", 5)),
             "upvotes": 0
         }

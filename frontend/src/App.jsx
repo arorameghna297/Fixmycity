@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import axios from 'axios';
 import { 
   MapPin, Image as ImageIcon, Send, Clock, 
@@ -37,6 +37,21 @@ function App() {
   const fileInputRef = useRef(null);
 
   /**
+   * @async
+   * @function fetchComplaints
+   * @description Rehydrates the React application state with JSON retrieved from Google Firebase via FastAPI.
+   * EFFICIENCY: Memoized logic via useCallback to prevent massive unneeded DOM re-renders.
+   */
+  const fetchComplaints = useCallback(async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/complaints`);
+      setComplaints(response.data);
+    } catch (err) {
+      console.error('Network Error: Failed to fetch active civic complaints', err);
+    }
+  }, []);
+
+  /**
    * @function useEffect
    * @description Application lifecycle hook to natively poll the dashboard endpoints dynamically.
    */
@@ -44,21 +59,7 @@ function App() {
     fetchComplaints();
     const interval = setInterval(fetchComplaints, 15000); // Polling 15s to reduce server load
     return () => clearInterval(interval);
-  }, []);
-
-  /**
-   * @async
-   * @function fetchComplaints
-   * @description Rehydrates the React application state with JSON retrieved from Google Firebase via FastAPI.
-   */
-  const fetchComplaints = async () => {
-    try {
-      const response = await axios.get(`${API_BASE_URL}/complaints`);
-      setComplaints(response.data);
-    } catch (err) {
-      console.error('Network Error: Failed to fetch active civic complaints', err);
-    }
-  };
+  }, [fetchComplaints]);
 
   /**
    * @async
@@ -66,14 +67,14 @@ function App() {
    * @param {string} id - The UUID of the complaint in Firebase.
    * @param {string} newStatus - "pending", "in_progress", or "resolved".
    */
-  const updateComplaintStatus = async (id, newStatus) => {
+  const updateComplaintStatus = useCallback(async (id, newStatus) => {
     try {
       await axios.patch(`${API_BASE_URL}/complaints/${id}/status`, { status: newStatus });
       fetchComplaints(); 
     } catch (err) {
       alert("Authorization Denied. Failed to update status.");
     }
-  };
+  }, [fetchComplaints]);
 
   /**
    * @async
@@ -81,14 +82,14 @@ function App() {
    * @description Sends a PATCH mutation to increment the priority hierarchy of a complaint.
    * @param {string} id - The primary key of the civic complaint.
    */
-  const upvoteComplaint = async (id) => {
+  const upvoteComplaint = useCallback(async (id) => {
     try {
       await axios.patch(`${API_BASE_URL}/complaints/${id}/upvote`);
       fetchComplaints(); 
     } catch (err) {
       console.error("Failed to commit upvote locally.");
     }
-  };
+  }, [fetchComplaints]);
 
   /**
    * @function useEffect
@@ -101,19 +102,19 @@ function App() {
     };
   }, [preview]);
 
-  const handleFileDrop = (e) => {
+  const handleFileDrop = useCallback((e) => {
     e.preventDefault();
     const droppedFile = e.dataTransfer.files[0];
     if (droppedFile && droppedFile.type.startsWith('image/')) {
       handleFileSelection(droppedFile);
     }
-  };
+  }, []);
 
-  const handleFileSelect = (e) => {
+  const handleFileSelect = useCallback((e) => {
     if (e.target.files && e.target.files[0]) {
       handleFileSelection(e.target.files[0]);
     }
-  };
+  }, []);
 
   const handleFileSelection = (selectedFile) => {
     setFile(selectedFile);
@@ -124,9 +125,9 @@ function App() {
 
   /**
    * @function getLocation
-   * @description Leverages the native HTML5 Geolocation API, falling back safely to Google Geocoding API strings or OpenStreetMap Nominatim defaults.
+   * @description Leverages the native HTML5 Geolocation API, falling back safely to Google Geocoding API strings or OSM defaults.
    */
-  const getLocation = () => {
+  const getLocation = useCallback(() => {
     if (!navigator.geolocation) {
       alert('Your browser does not support geolocation.');
       return;
@@ -162,14 +163,14 @@ function App() {
         alert('Location access denied. Please manually type location.');
       }
     );
-  };
+  }, []);
 
   /**
    * @async
    * @function handleSubmit
    * @description Validates Form inputs and executes asynchronous Multi-Part streaming bytes safely to the backend.
    */
-  const handleSubmit = async (e) => {
+  const handleSubmit = useCallback(async (e) => {
     e.preventDefault();
     if (!file) {
       alert('A valid image input is strictly required.');
@@ -198,30 +199,39 @@ function App() {
     } finally {
       setIsSubmitting(false);
     }
-  };
+  }, [file, location, context, fetchComplaints]);
 
-  const getSeverityColor = (score) => {
+  const getSeverityColor = useCallback((score) => {
      if (score >= 8) return 'severity-high';
      if (score >= 4) return 'severity-medium';
      return 'severity-low';
-  };
+  }, []);
+
+  // EFFICIENCY: useMemo prevents arrays from being calculated on every single React render pass.
+  const filteredComplaints = useMemo(() => {
+    return complaints.filter(c => 
+      c.location?.toLowerCase().includes(searchTerm.toLowerCase()) || 
+      c.issue_type?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      c.department?.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  }, [complaints, searchTerm]);
 
   // --- SUB COMPONENTS ---
 
-  const renderIssueForm = () => (
+  const renderIssueForm = useCallback(() => (
     <form onSubmit={handleSubmit} className="upload-section" aria-label="Official Document Submission Form">
       <div 
         className={`drop-zone ${preview ? 'has-image' : ''}`}
         onDragOver={(e) => e.preventDefault()}
         onDrop={handleFileDrop}
-        onClick={() => fileInputRef.current.click()}
+        onClick={() => fileInputRef.current?.click()}
         role="button"
         tabIndex={0}
         aria-label="Upload visual evidence of civic issue"
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
-            fileInputRef.current.click();
+            fileInputRef.current?.click();
           }
         }}
       >
@@ -238,7 +248,7 @@ function App() {
           ref={fileInputRef} 
           onChange={handleFileSelect}
           accept="image/*"
-          style={{ display: 'none' }} 
+          className="visually-hidden"
           aria-hidden="true"
         />
       </div>
@@ -257,14 +267,14 @@ function App() {
 
       <div className="input-group">
         <label htmlFor="location">Geospatial Marker / Location</label>
-        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+        <div className="location-row">
           <input 
             id="location"
             type="text" 
             placeholder="e.g. Chinnapanahalli Main Road"
             value={location}
             onChange={(e) => setLocation(e.target.value)}
-            style={{ flex: 1 }}
+            className="flex-fill"
             aria-label="Location text field"
           />
           <button type="button" className="location-btn" onClick={getLocation} disabled={isLocating} aria-label="Auto detect physical GPS location">
@@ -276,39 +286,31 @@ function App() {
 
       <button type="submit" className="submit-btn" disabled={isSubmitting || !file} aria-label="Submit issue to AI processing engine">
         {isSubmitting ? (
-           <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.8rem' }} aria-live="polite">
+           <span className="submit-inner" aria-live="polite">
              <div className="loading-spinner" aria-label="Loading"></div> Analyzing with Google Gemini 2.5...
            </span>
         ) : (
-           <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.8rem' }}>
+           <span className="submit-inner">
              <Send size={20} aria-hidden="true" /> Transmit Official Report
            </span>
         )}
       </button>
     </form>
-  );
+  ), [handleSubmit, preview, handleFileDrop, handleFileSelect, context, location, getLocation, isLocating, isSubmitting, file]);
 
-  const renderPublicFeed = () => {
-    // EFFICIENCY: Memory-safe local JS filtering
-    const filteredComplaints = complaints.filter(c => 
-      c.location?.toLowerCase().includes(searchTerm.toLowerCase()) || 
-      c.issue_type?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      c.department?.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-
+  const renderPublicFeed = useCallback(() => {
     return (
       <div className="feed-section">
         <div className="feed-header">
-           <h2 style={{fontSize: '1.8rem'}}>Live Civic Registry</h2>
-           <div style={{position: 'relative', flex: 1, maxWidth: '400px'}}>
-             <Search size={18} style={{position: 'absolute', top: '1.1rem', left: '1.2rem', color: '#94a3b8'}} aria-hidden="true"/>
+           <h2 className="feed-title">Live Civic Registry</h2>
+           <div className="search-wrapper">
+             <Search size={18} className="search-icon" aria-hidden="true"/>
              <input 
                 type="text"
                 className="search-bar"
                 placeholder="Search Database by Area, Location, or Dept..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                style={{paddingLeft: '3rem'}}
                 aria-label="Search and filter active civic issues"
              />
            </div>
@@ -317,13 +319,13 @@ function App() {
         {/* ACCESSIBILITY: aria-live region politely announces dynamic DOM updates to screenreaders */}
         <div aria-live="polite" className="complaints-list" role="feed">
           {filteredComplaints.length === 0 ? (
-             <div style={{textAlign: 'center', padding: '3rem', color: '#94a3b8'}} role="status">No geospatial issues indexed in this sector.</div>
+             <div className="empty-feed" role="status">No geospatial issues indexed in this sector.</div>
           ) : (
             filteredComplaints.map((item) => (
               <div key={item.id} className="complaint-card" role="article" aria-label={`Complaint regarding ${item.issue_type}`}>
                 <div className="complaint-header">
                   <span className="issue-type">{item.issue_type}</span>
-                  <div style={{display: 'flex', gap: '0.5rem'}}>
+                  <div className="badge-row">
                      <span className={`severity-badge ${getSeverityColor(item.severity_score)}`} title="AI Danger/Severity Score" aria-label={`Severity Score ${item.severity_score} out of 10`}>
                        🔥 {item.severity_score}/10
                      </span>
@@ -366,15 +368,15 @@ function App() {
         </div>
       </div>
     );
-  };
+  }, [filteredComplaints, searchTerm, getSeverityColor, upvoteComplaint, expandedDoc]);
 
-  const renderAuthorityPortal = () => (
+  const renderAuthorityPortal = useCallback(() => (
     <div className="portal-container" role="application" aria-label="Official Government Data Dashboard">
-       <div style={{padding: '1.5rem 1.5rem 0', display: 'flex', justifyContent: 'space-between'}}>
-         <h2 style={{margin: 0}}>Official Administration Dashboard</h2>
-         <span style={{background: 'rgba(236,72,153,0.2)', color: '#ec4899', padding: '0.4rem 1rem', borderRadius: '50px', fontSize: '0.8rem', fontWeight: 800}}>RESTRICTED ACCESS</span>
+       <div className="portal-header-row">
+         <h2 className="portal-title">Official Administration Dashboard</h2>
+         <span className="restricted-badge">RESTRICTED ACCESS</span>
        </div>
-       <div style={{overflowX: 'auto', padding: '1.5rem'}}>
+       <div className="table-responsive">
          <table className="portal-table" aria-label="Tabular overview of active civic infrastructure failures">
             <thead>
               <tr>
@@ -387,7 +389,7 @@ function App() {
               </tr>
             </thead>
             <tbody>
-              {complaints.length === 0 && <tr><td colSpan="6" style={{textAlign: "center"}}>No pending infrastructure events.</td></tr>}
+              {complaints.length === 0 && <tr><td colSpan="6" className="table-empty">No pending infrastructure events.</td></tr>}
               {complaints.sort((a,b) => (b.upvotes||0) - (a.upvotes||0)).map(item => (
                 <tr key={item.id}>
                   <td>
@@ -397,10 +399,10 @@ function App() {
                   </td>
                   <td>
                     <strong>{item.issue_type}</strong><br/>
-                    <span style={{fontSize: '0.85rem', color: '#94a3b8'}}>{item.department}</span>
+                    <span className="subtitle-gray">{item.department}</span>
                   </td>
                   <td>{item.location}</td>
-                  <td><strong style={{color: '#60a5fa'}}>{item.upvotes||0} Signatures</strong></td>
+                  <td><strong className="upvotes-blue">{item.upvotes||0} Signatures</strong></td>
                   <td>
                     <span className={`status-badge status-${item.status}`}>
                       {item.status.replace('_', ' ')}
@@ -426,7 +428,7 @@ function App() {
          </table>
        </div>
     </div>
-  );
+  ), [complaints, getSeverityColor, updateComplaintStatus]);
 
   return (
     <div className="app-container">
