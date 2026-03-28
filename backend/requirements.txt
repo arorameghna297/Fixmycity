@@ -6,5 +6,4 @@ python-multipart
 python-dotenv
 pytest
 httpx
-pytest
-httpx
+google-cloud-logging

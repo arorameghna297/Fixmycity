@@ -1,0 +1,38 @@
+name: FixMyCity AI - Enterprise CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+        
+    - name: Install Secure Backend Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install fastapi uvicorn pytest httpx python-multipart google-generativeai firebase-admin pydantic pytest-asyncio
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        
+    - name: Lint Python Code quality via Standard Static Analyzers
+      run: |
+        pip install flake8
+        # Stop the build if there are Python syntax errors or undefined names
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        
+    - name: Run Test Coverage Matrix (Pytest via HTTPX)
+      env:
+        GEMINI_API_KEY: ${{ secrets.MOCK_CI_KEY }}
+      run: |
+        cd backend
+        pytest test_main.py -v
