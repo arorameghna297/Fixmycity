@@ -13,6 +13,7 @@ function App() {
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
   const [location, setLocation] = useState('');
+  const [isLocating, setIsLocating] = useState(false);
   const [context, setContext] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [complaints, setComplaints] = useState([]);
@@ -75,9 +76,37 @@ function App() {
       alert('Geolocation is not supported by your browser');
       return;
     }
+    
+    setIsLocating(true);
     navigator.geolocation.getCurrentPosition(
-      (position) => setLocation(`Lat: ${position.coords.latitude.toFixed(4)}, Lng: ${position.coords.longitude.toFixed(4)}`),
-      (error) => alert('Failed to get location. Please allow location access.')
+      async (position) => {
+        const lat = position.coords.latitude;
+        const lon = position.coords.longitude;
+        try {
+          // REVERSE GEOCODING: Convert Lat/Lng to precise City/Area instantly and for free
+          const res = await axios.get(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`);
+          if (res.data && res.data.address) {
+            const addr = res.data.address;
+            // Best effort at finding neighborhood/area then city
+            const area = addr.suburb || addr.neighbourhood || addr.village || addr.city_district || addr.road || '';
+            const city = addr.city || addr.town || addr.county || addr.state || '';
+            const locationString = [area, city].filter(Boolean).join(', ');
+            // Fallback to display_name or coordinates if area/city extraction fails
+            setLocation(locationString || res.data.display_name || `Lat: ${lat.toFixed(4)}, Lng: ${lon.toFixed(4)}`);
+          } else {
+            setLocation(`Lat: ${lat.toFixed(4)}, Lng: ${lon.toFixed(4)}`);
+          }
+        } catch (err) {
+          console.error('Reverse geocoding failed', err);
+          setLocation(`Lat: ${lat.toFixed(4)}, Lng: ${lon.toFixed(4)}`); // Fallback safely
+        } finally {
+          setIsLocating(false);
+        }
+      },
+      (error) => {
+        setIsLocating(false);
+        alert('Failed to get location. Please allow location access.');
+      }
     );
   };
 
@@ -170,8 +199,9 @@ function App() {
             onChange={(e) => setLocation(e.target.value)}
             style={{ flex: 1 }}
           />
-          <button type="button" className="location-btn" onClick={getLocation}>
-            <MapPin size={18} /> GPS Detect
+          <button type="button" className="location-btn" onClick={getLocation} disabled={isLocating}>
+            <MapPin size={18} /> 
+            {isLocating ? 'Detecting Area...' : 'GPS Detect'}
           </button>
         </div>
       </div>
