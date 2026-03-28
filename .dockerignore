@@ -1,0 +1,20 @@
+# Ignore Node and Python caches
+node_modules/
+npm-debug.log
+frontend/dist/
+frontend/build/
+.npm
+
+__pycache__/
+*.py[cod]
+*$py.class
+backend/venv/
+venv/
+.env
+
+# Ignore git files
+.git/
+.gitignore
+
+# Environment-specific
+.DS_Store
