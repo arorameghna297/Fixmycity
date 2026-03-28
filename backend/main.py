@@ -87,6 +87,8 @@ class ComplaintResponse(BaseModel):
     status: str
     timestamp: str
     formal_complaint: str
+    severity_score: int
+    upvotes: int
 
 class StatusUpdateRequest(BaseModel):
     """Data model for authority status updates."""
@@ -164,46 +166,31 @@ async def report_issue(
         classification_prompt = f"""
         You are a civic issue classifier.
         Given this image, identify:
-        1. Type of issue (pothole, garbage, streetlight, water leakage, etc.)
-        2. Severity (low, medium, high)
-        3. Short description
+        1. "issue_type": A 2-4 word classification of the primary civic problem shown.
+        2. "description": A concise, detailed 2 sentence description of what is damaged or needed.
+        3. "severity_score": An integer from 1 to 10 evaluating the danger or urgency of this issue.
+        4. "formal_complaint": A 3 paragraph, highly formal and legalistic grievance typed as if it was being directly submitted by a furious citizen to the municipal government. Address it to the 'Respected Commissioner' and urgently demand resolution using strong civic vocabulary.
         
         {("Extra user context: " + extra_context) if extra_context else ""}
 
-        Return ONLY a raw JSON format (no markdown codeblocks like ```json):
+        Return ONLY a raw JSON format:
         {{
           "issue_type": "string",
-          "severity": "string",
-          "description": "string"
+          "severity_score": 5,
+          "description": "string",
+          "formal_complaint": "string"
         }}
         """
 
         response = model.generate_content([classification_prompt, image_parts[0]])
         raw_text = response.text.replace('```json', '').replace('```', '').strip()
-        result_json = json.loads(raw_text)
+        ai_data = json.loads(raw_text)
         
-        issue_type = result_json.get("issue_type", "Unknown Issue")
-        severity = result_json.get("severity", "medium")
-        description = result_json.get("description", "No description provided.")
+        issue_type = ai_data.get("issue_type", "Unknown Issue")
+        description = ai_data.get("description", "No description provided.")
         
         # STEP 4: Decision Engine Map
-        department = map_department(issue_type)
-        priority = "urgent" if severity.lower() == "high" else "normal"
-            
-        # STEP 5: Auto-Generate Formal Complaint via Text LLM
-        formal_prompt = f"""
-        Generate a formal civic complaint.
-
-        Issue: {issue_type}
-        Description: {description}
-        Location: {location}
-        Priority: {priority}
-
-        Make it concise and professional. Do not use placeholders like [Your Name].
-        """
-        
-        formal_response = model.generate_content([formal_prompt])
-        formal_complaint_text = formal_response.text.strip()
+        department_mapped = map_department(issue_type)
         
         doc_id = str(uuid.uuid4())
         timestamp_str = datetime.utcnow().isoformat() + "Z"
@@ -213,11 +200,12 @@ async def report_issue(
             "issue_type": issue_type,
             "description": description,
             "location": location,
-            "department": department,
-            "priority": priority,
+            "department": department_mapped,
             "status": "pending",
             "timestamp": timestamp_str,
-            "formal_complaint": formal_complaint_text
+            "formal_complaint": ai_data.get("formal_complaint", "Pending formal review."),
+            "severity_score": int(ai_data.get("severity_score", 5)),
+            "upvotes": 0
         }
         
         # STEP 7: Firebase FireStore Integration
@@ -279,6 +267,33 @@ async def update_complaint_status(complaint_id: str, request: StatusUpdateReques
     except Exception as e:
         logger.error(f"Error updating complaint: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to update complaint status")
+
+@app.patch("/api/complaints/{complaint_id}/upvote")
+async def upvote_complaint(complaint_id: str) -> dict:
+    """Public endpoint to upvote a complaint to increase its visibility."""
+    try:
+        # Update Firebase if initialized
+        if db is not None:
+            doc_ref = db.collection("complaints").document(complaint_id)
+            doc = doc_ref.get()
+            if not doc.exists:
+                raise HTTPException(status_code=404, detail="Complaint not found")
+            current_upvotes = doc.to_dict().get("upvotes", 0)
+            doc_ref.update({"upvotes": current_upvotes + 1})
+            return {"status": "success", "new_upvotes": current_upvotes + 1}
+        else:
+            # Fallback to Mock DB
+            if complaint_id not in mock_db:
+                raise HTTPException(status_code=404, detail="Complaint not found")
+            current_upvotes = mock_db[complaint_id].get("upvotes", 0)
+            mock_db[complaint_id]["upvotes"] = current_upvotes + 1
+            return {"status": "success", "new_upvotes": current_upvotes + 1}
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error upvoting complaint: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to upvote complaint")
 
 
 # Mount the React static files

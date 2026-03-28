@@ -3,7 +3,7 @@ import axios from 'axios';
 import { 
   MapPin, Image as ImageIcon, Send, Clock, 
   CheckCircle, AlertTriangle, Building, 
-  Search, FileText, Activity, Shield
+  Search, FileText, Activity, Shield, ThumbsUp
 } from 'lucide-react';
 
 const API_BASE_URL = import.meta.env.DEV ? 'http://localhost:8000/api' : '/api';
@@ -18,12 +18,13 @@ function App() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [complaints, setComplaints] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [expandedDoc, setExpandedDoc] = useState(null); // Track which formal document is open
   
   const fileInputRef = useRef(null);
 
   useEffect(() => {
     fetchComplaints();
-    const interval = setInterval(fetchComplaints, 10000); // Polling every 10s
+    const interval = setInterval(fetchComplaints, 10000); // Polling
     return () => clearInterval(interval);
   }, []);
 
@@ -41,13 +42,22 @@ function App() {
       await axios.patch(`${API_BASE_URL}/complaints/${id}/status`, { status: newStatus });
       fetchComplaints(); // Instantly refresh
     } catch (err) {
-      alert("Failed to update status. Are you authorized?");
+      alert("Failed to update status.");
+    }
+  };
+
+  const upvoteComplaint = async (id) => {
+    try {
+      await axios.patch(`${API_BASE_URL}/complaints/${id}/upvote`);
+      fetchComplaints(); // Instantly refresh
+    } catch (err) {
+      console.error("Failed to upvote.");
     }
   };
 
   useEffect(() => {
     return () => {
-      if (preview) URL.revokeObjectURL(preview); // Memory efficiency
+      if (preview) URL.revokeObjectURL(preview);
     };
   }, [preview]);
 
@@ -83,22 +93,18 @@ function App() {
         const lat = position.coords.latitude;
         const lon = position.coords.longitude;
         try {
-          // REVERSE GEOCODING: Convert Lat/Lng to precise City/Area instantly and for free
           const res = await axios.get(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`);
           if (res.data && res.data.address) {
             const addr = res.data.address;
-            // Best effort at finding neighborhood/area then city
             const area = addr.suburb || addr.neighbourhood || addr.village || addr.city_district || addr.road || '';
             const city = addr.city || addr.town || addr.county || addr.state || '';
             const locationString = [area, city].filter(Boolean).join(', ');
-            // Fallback to display_name or coordinates if area/city extraction fails
             setLocation(locationString || res.data.display_name || `Lat: ${lat.toFixed(4)}, Lng: ${lon.toFixed(4)}`);
           } else {
             setLocation(`Lat: ${lat.toFixed(4)}, Lng: ${lon.toFixed(4)}`);
           }
         } catch (err) {
-          console.error('Reverse geocoding failed', err);
-          setLocation(`Lat: ${lat.toFixed(4)}, Lng: ${lon.toFixed(4)}`); // Fallback safely
+          setLocation(`Lat: ${lat.toFixed(4)}, Lng: ${lon.toFixed(4)}`); 
         } finally {
           setIsLocating(false);
         }
@@ -132,7 +138,7 @@ function App() {
       setContext('');
       setLocation('');
       await fetchComplaints();
-      setActiveTab('feed'); // Auto-switch to feed on success
+      setActiveTab('feed'); 
     } catch (err) {
       alert('Failed to submit complaint. File too large or API error.');
     } finally {
@@ -140,10 +146,16 @@ function App() {
     }
   };
 
+  const getSeverityColor = (score) => {
+     if (score >= 8) return 'severity-high';
+     if (score >= 4) return 'severity-medium';
+     return 'severity-low';
+  };
+
   // --- SUB COMPONENTS ---
 
   const renderIssueForm = () => (
-    <form onSubmit={handleSubmit} className="upload-section" aria-label="Issue Reporting Form">
+    <form onSubmit={handleSubmit} className="upload-section">
       <div 
         className={`drop-zone ${preview ? 'has-image' : ''}`}
         onDragOver={(e) => e.preventDefault()}
@@ -151,19 +163,12 @@ function App() {
         onClick={() => fileInputRef.current.click()}
         role="button"
         tabIndex={0}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            fileInputRef.current.click();
-          }
-        }}
-        aria-label="Upload civic issue image"
       >
         {preview ? (
-          <img src={preview} alt={`Preview of uploaded civic issue`} className="preview" />
+          <img src={preview} alt="Preview" className="preview" />
         ) : (
           <>
-            <ImageIcon className="icon-placeholder" aria-hidden="true" />
+            <ImageIcon className="icon-placeholder" />
             <p>Click to browse or drag an image here safely</p>
           </>
         )}
@@ -173,7 +178,6 @@ function App() {
           onChange={handleFileSelect}
           accept="image/*"
           style={{ display: 'none' }} 
-          aria-hidden="true"
         />
       </div>
 
@@ -209,7 +213,7 @@ function App() {
       <button type="submit" className="submit-btn" disabled={isSubmitting || !file}>
         {isSubmitting ? (
            <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.8rem' }}>
-             <div className="loading-spinner"></div> Processing Image w/ AI...
+             <div className="loading-spinner"></div> Analyzing with Gemini 2.5 AI...
            </span>
         ) : (
            <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.8rem' }}>
@@ -221,7 +225,6 @@ function App() {
   );
 
   const renderPublicFeed = () => {
-    // AREA AND TEXT FILTERING
     const filteredComplaints = complaints.filter(c => 
       c.location?.toLowerCase().includes(searchTerm.toLowerCase()) || 
       c.issue_type?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -246,22 +249,48 @@ function App() {
         </div>
         
         {filteredComplaints.length === 0 ? (
-           <div style={{textAlign: 'center', padding: '3rem', color: '#94a3b8'}}>No issues found for this area.</div>
+           <div style={{textAlign: 'center', padding: '3rem', color: '#94a3b8'}}>No issues found in this area.</div>
         ) : (
           <div className="complaints-list">
             {filteredComplaints.map((item) => (
               <div key={item.id} className="complaint-card">
                 <div className="complaint-header">
                   <span className="issue-type">{item.issue_type}</span>
-                  <span className={`status-badge status-${item.status}`}>
-                    {item.status.replace('_', ' ')}
-                  </span>
+                  <div style={{display: 'flex', gap: '0.5rem'}}>
+                     <span className={`severity-badge ${getSeverityColor(item.severity_score)}`} title="AI Danger/Severity Score">
+                       🔥 {item.severity_score}/10
+                     </span>
+                     <span className={`status-badge status-${item.status}`}>
+                       {item.status.replace('_', ' ')}
+                     </span>
+                  </div>
                 </div>
+                
                 <p className="complaint-body">{item.description}</p>
+                
                 <div className="complaint-meta">
                   <span className="meta-item"><Building size={16} className="meta-icon"/> {item.department}</span>
                   <span className="meta-item"><MapPin size={16} className="meta-icon"/> {item.location}</span>
                 </div>
+
+                <div className="card-actions">
+                   <button className="upvote-btn" onClick={() => upvoteComplaint(item.id)}>
+                      <ThumbsUp size={16} /> <span>{item.upvotes || 0} Upvotes</span>
+                   </button>
+                   <button 
+                      className="expand-doc-btn" 
+                      onClick={() => setExpandedDoc(expandedDoc === item.id ? null : item.id)}
+                   >
+                     <FileText size={16} /> View Official Letter
+                   </button>
+                </div>
+
+                {expandedDoc === item.id && (
+                   <div className="formal-doc-box">
+                     <h4>AI-Generated Grievance Request</h4>
+                     <p>{item.formal_complaint}</p>
+                   </div>
+                )}
               </div>
             ))}
           </div>
@@ -280,23 +309,29 @@ function App() {
          <table className="portal-table">
             <thead>
               <tr>
+                <th>Risk Rating</th>
                 <th>Issue Details</th>
-                <th>Area / Location</th>
-                <th>Department Routed To</th>
+                <th>Location</th>
+                <th>Priority (Upvotes)</th>
                 <th>Status</th>
                 <th>Admin Actions</th>
               </tr>
             </thead>
             <tbody>
-              {complaints.length === 0 && <tr><td colSpan="5">No active reports.</td></tr>}
-              {complaints.map(item => (
+              {complaints.length === 0 && <tr><td colSpan="6">No active reports.</td></tr>}
+              {complaints.sort((a,b) => (b.upvotes||0) - (a.upvotes||0)).map(item => (
                 <tr key={item.id}>
                   <td>
+                    <span className={`severity-badge ${getSeverityColor(item.severity_score)}`}>
+                       🔥 {item.severity_score}/10
+                    </span>
+                  </td>
+                  <td>
                     <strong>{item.issue_type}</strong><br/>
-                    <span style={{fontSize: '0.85rem', color: '#94a3b8'}}>{item.description?.substring(0, 40)}...</span>
+                    <span style={{fontSize: '0.85rem', color: '#94a3b8'}}>{item.department}</span>
                   </td>
                   <td>{item.location}</td>
-                  <td>{item.department}</td>
+                  <td><strong style={{color: '#60a5fa'}}>{item.upvotes||0} Votes</strong></td>
                   <td>
                     <span className={`status-badge status-${item.status}`}>
                       {item.status.replace('_', ' ')}
@@ -339,7 +374,7 @@ function App() {
           <Activity size={18} /> Public Feed
         </button>
         <button className={`tab-btn ${activeTab === 'portal' ? 'active' : ''}`} onClick={() => setActiveTab('portal')}>
-          <Shield size={18} /> Authority Portal
+          <Shield size={18} /> Authority Dashboard
         </button>
       </div>
 
