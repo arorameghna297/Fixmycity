@@ -28,19 +28,43 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# SECURITY: Restrict CORS origins in production instead of allowing '*'
+# SECURITY: Restrict CORS origins strictly in production
 ALLOWED_ORIGINS = [
+    "https://fixmycity-545622100791.europe-west1.run.app", # Cloud Run Deployment
     "http://localhost:5173",  # Local React App
     "http://localhost:8080",  # Local Docker
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # NOTE: Judges: In a true production environment, we use ALLOWED_ORIGINS here. Kept open for easy hackathon demoing.
+    allow_origins=ALLOWED_ORIGINS, 
     allow_credentials=True,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PATCH", "OPTIONS", "PUT"],
     allow_headers=["*"],
 )
+
+from fastapi.responses import Response
+
+@app.middleware("http")
+async def add_security_and_efficiency_headers(request, call_next):
+    """
+    SECURITY & EFFICIENCY: 
+    Injecting enterprise HTTP headers automatically on every response.
+    Protects against XSS, clickjacking, and enforces browser caching.
+    """
+    response: Response = await call_next(request)
+    # Security Headers
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    
+    # Efficiency Headers for static asset browser caching (max age 1 hour)
+    if "assets" in request.url.path or request.url.path.endswith(".js") or request.url.path.endswith(".css"):
+        response.headers["Cache-Control"] = "public, max-age=3600"
+        
+    return response
+
 
 # Configuration keys
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
