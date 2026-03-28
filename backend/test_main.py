@@ -1,6 +1,6 @@
 import pytest
 from httpx import AsyncClient, ASGITransport
-from backend.main import app, mock_db
+from main import app, mock_db
 import uuid
 
 # --- FIXTURES ---
