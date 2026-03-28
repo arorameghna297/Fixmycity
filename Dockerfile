@@ -28,10 +28,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy backend source code including the .env file if it exists
+# Copy backend source code
 COPY backend/ ./
-COPY .env ../.env
-
 # Copy the built React app from the first stage into backend/static
 COPY --from=frontend-builder /app/backend/static ./static
 
