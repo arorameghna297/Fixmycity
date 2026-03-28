@@ -4,3 +4,7 @@ google-generativeai
 firebase-admin
 python-multipart
 python-dotenv
+pytest
+httpx
+pytest
+httpx

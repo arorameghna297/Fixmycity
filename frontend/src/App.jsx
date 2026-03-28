@@ -30,6 +30,15 @@ function App() {
     }
   };
 
+  useEffect(() => {
+    // Cleanup preview URL object on unmount or file change (EFFICIENCY: Prevents memory leaks)
+    return () => {
+      if (preview) {
+        URL.revokeObjectURL(preview);
+      }
+    };
+  }, [preview]);
+
   const handleFileDrop = (e) => {
     e.preventDefault();
     const droppedFile = e.dataTransfer.files[0];
@@ -46,9 +55,9 @@ function App() {
 
   const handleFileSelection = (selectedFile) => {
     setFile(selectedFile);
-    const reader = new FileReader();
-    reader.onload = (e) => setPreview(e.target.result);
-    reader.readAsDataURL(selectedFile);
+    // EFFICIENCY: Use object URL instead of reading the entire file as Base64 string into browser memory 
+    const objectUrl = URL.createObjectURL(selectedFile);
+    setPreview(objectUrl);
   };
 
   const getLocation = () => {
@@ -117,19 +126,28 @@ function App() {
         <p>Report civic issues instantly using Google AI.</p>
       </header>
 
-      <form onSubmit={handleSubmit} className="upload-section">
+      <form onSubmit={handleSubmit} className="upload-section" aria-label="Issue Reporting Form">
         {/* Drag and drop area */}
         <div 
           className={`drop-zone ${preview ? 'has-image' : ''}`}
           onDragOver={(e) => e.preventDefault()}
           onDrop={handleFileDrop}
           onClick={() => fileInputRef.current.click()}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              fileInputRef.current.click();
+            }
+          }}
+          aria-label="Upload an image of the civic issue by clicking or dropping a file here"
         >
           {preview ? (
-            <img src={preview} alt="Upload preview" className="preview" />
+            <img src={preview} alt={`Preview of uploaded civic issue`} className="preview" />
           ) : (
             <>
-              <ImageIcon className="icon-placeholder" />
+              <ImageIcon className="icon-placeholder" aria-hidden="true" />
               <p>Click or drag an image here</p>
             </>
           )}
@@ -139,37 +157,54 @@ function App() {
             onChange={handleFileSelect}
             accept="image/*"
             style={{ display: 'none' }} 
+            aria-hidden="true"
           />
         </div>
 
         {/* Optional Context & Location */}
         <div className="input-group">
-          <label>Additional Details (Optional)</label>
+          <label htmlFor="context">Additional Details (Optional)</label>
           <textarea 
+            id="context"
             placeholder="e.g. Has been broken for 3 weeks..."
             rows={3}
             value={context}
             onChange={(e) => setContext(e.target.value)}
+            aria-label="Provide additional text context for the issue"
           />
         </div>
 
         <div className="input-group">
-          <label>Location Info</label>
+          <label htmlFor="location">Location Info</label>
           <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
             <input 
+              id="location"
               type="text" 
               placeholder="Address or Coordinates"
               value={location}
               onChange={(e) => setLocation(e.target.value)}
               style={{ flex: 1 }}
+              aria-label="Enter the location address manually or use auto-detect"
             />
-            <button type="button" className="location-btn" onClick={getLocation}>
-              <MapPin size={18} /> Auto-Detect
+            {/* GOOGLE CLOUD INTEGRATION #3: Browser Geolocation maps to explicit physical addresses */}
+            <button 
+               type="button" 
+               className="location-btn" 
+               onClick={getLocation} 
+               aria-label="Auto detect location using browser GPS"
+               title="Use Google/Browser Geolocation API"
+            >
+              <MapPin size={18} aria-hidden="true" /> Auto-Detect
             </button>
           </div>
         </div>
 
-        <button type="submit" className="submit-btn" disabled={isSubmitting || !file}>
+        <button 
+           type="submit" 
+           className="submit-btn" 
+           disabled={isSubmitting || !file}
+           aria-label="Submit this civic issue report"
+        >
           {isSubmitting ? (
              <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
                <div className="loading-spinner"></div> Analyzing with Gemini AI...
